@@ -2535,6 +2535,14 @@ lsq_refresh(void)
   /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
+
+ /***********************OUR PLAN ******************/
+  /* CREATE A MAP THAT RELATES 1 load address to 1 or more store addresses */
+  /* If the load address does not have any stores in its set, ADD THIS LOAD TO READY QUEUE*/
+  /* For the stores in a load set, check to see if the store is unresolved (steal their method */
+  /* Remove 
+ */   
+
   for (i=0, index=LSQ_head, n_std_unknowns=0;
        i < LSQ_num;
        i++, index=(index + 1) % LSQ_size)
