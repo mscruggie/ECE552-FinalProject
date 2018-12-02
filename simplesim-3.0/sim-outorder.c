@@ -2536,11 +2536,12 @@ lsq_refresh(void)
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
 
- /***********************OUR PLAN ******************/
-  /* CREATE A MAP THAT RELATES 1 load address to 1 or more store addresses */
-  /* If the load address does not have any stores in its set, ADD THIS LOAD TO READY QUEUE*/
+ /*******************************************************OUR PLAN ****************************************/
+  /* CREATE A MAP THAT RELATES 1 load PC to 1 or more store PCs */
+  /* If the load does not have any stores in its set, ADD THIS LOAD TO READY QUEUE*/
   /* For the stores in a load set, check to see if the store is unresolved (steal their method */
-  /* Remove 
+  // TODO: Figure out how to implement a map
+
  */   
 
   for (i=0, index=LSQ_head, n_std_unknowns=0;
@@ -2556,6 +2557,9 @@ lsq_refresh(void)
 	    {
 	      /* FIXME: a later STD + STD known could hide the STA unknown */
 	      /* sta unknown, blocks all later loads, stop search */
+	      /************************** Remove this break as an unknown load address is not a deal breaker *********************/
+	      /************************** But this would make the store unresolved so add it to the array of unkowns ************/
+
 	      break;
 	    }
 	  else if (!OPERANDS_READY(&LSQ[index]))
