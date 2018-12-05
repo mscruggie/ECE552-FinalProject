@@ -2695,6 +2695,7 @@ lsq_refresh(void)
                     //no STA or STD unknown conflicts in store set, put load on ready queue //
                     readyq_enqueue(&LSQ[index]);
                 }
+                break;
             }
             else{
                 currMap = currMap + 1;
