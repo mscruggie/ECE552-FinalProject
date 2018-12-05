@@ -2558,18 +2558,12 @@ lsq_refresh(void)
   int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
   md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
   md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
-  md_addr_t store_unresolved_PC[MAX_STD_UNKNOWNS];
+  md_addr_t store_unresolved_PC[MAX_STD_UNKNOWNS]; // store_unresolved_PC is an array of the stores PCs for which we do not know either the data or address or both
     
 
   /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
-
- /*******************************************************OUR PLAN ****************************************/
-  /* CREATE A MAP THAT RELATES 1 load PC to 1 or more store PCs */
-  /* If the load does not have any stores in its set, ADD THIS LOAD TO READY QUEUE*/
-  /* For the stores in a load set, check to see if the store is unresolved (steal their method)*/
-  // TODO: Figure out how to implement a map
 
 
   for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0, n_store_unresolved=0;
@@ -2581,7 +2575,7 @@ lsq_refresh(void)
       if (/* store? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A STORE ***********************/
 	  (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
 	{
-        /**************** OLD CODE ******************************
+        /*~~~~~~~~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	  if (!STORE_ADDR_READY(&LSQ[index]))
 	    {
 	      // FIXME: a later STD + STD known could hide the STA unknown
@@ -2607,10 +2601,11 @@ lsq_refresh(void)
 		  if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
 		    std_unknowns[j] = 0; // bogus addr
 		}
-	    }********************************************************/
+	    }~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+        
         if (!STORE_ADDR_READY(&LSQ[index]))
         {
-            // sta unknown
+            /************** ADDRESS IS UNKOWN  ******ADD TO STA ARRAY AND UNRESOLVED ARRAY**************/
             if (n_sta_unknowns == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
             sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
@@ -2620,10 +2615,7 @@ lsq_refresh(void)
         }
         else if (!OPERANDS_READY(&LSQ[index]))
         {
-            // sta known, but std unknown, may block a later store, record
-            //this address for later referral, we use an array here because
-            //for most simulations the number of entries to search will be
-            //very small
+            /********** DATA IS UNKNOWN ***********ADD TO STD ARRAY AND UNRESOLVED ARRAY******/
             if (n_std_unknowns == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
             std_unknowns[n_std_unknowns++] = LSQ[index].addr;
@@ -2669,20 +2661,21 @@ lsq_refresh(void)
 	    */
           /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
         struct Map* currMap = storeSetMap;
-        int found= 0;
+        int found= 0; // initialize found to NOT FOUND
         int * storeset;
         int iter;
-        for(iter=0; iter<SSM_num; iter++){
+        for(iter=0; iter<SSM_num; iter++){// iterate through the map
             if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
                 found = 1;
                 storeset = currMap->value;
-                int conflict=0;
+                int conflict=0; // initialize conflictness to NO CONFLICT
                 int iter2;
-                for(iter2=0; iter2 < 4; iter2++) {   /*************** TODO: CHECK EACH STORE IN FLIGHT AGAINST THE LOAD ***********/
+                for(iter2=0; iter2 < 4; iter2++) {   // iterate throught the store set
                     int iter3;
-                    for (iter3=0; iter3<n_store_unresolved; iter3++){
-                        // found a relevant store PC
+                    for (iter3=0; iter3<n_store_unresolved; iter3++){ // check to see if a particular store in the set is in flight
                         if (store_unresolved_PC[iter3] == LSQ[index].PC){
+                            //TODO: if the address is known and it's not the same as load address, do not make it a conflict
+                            // TODO: so it would be ideal if the PCs and the addresses were together in a pair to access them cuncurrently in some combination of the std_unknown address and store_unresolved PC
                             conflict =1;
                             break;
                         }
@@ -2698,7 +2691,7 @@ lsq_refresh(void)
                 break;
             }
             else{
-                currMap = currMap + 1;
+                currMap = currMap + 1; // keep looking through map if not found
             }
             
         }
