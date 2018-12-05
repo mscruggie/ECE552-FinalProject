@@ -1355,6 +1355,9 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
 /* forward declarations */
 static void ruu_init(void);
 static void lsq_init(void);
+/*************** ECE552 Modifying **********/
+static void storeSetMap_int();
+/********* **********************************/
 static void rslink_init(int nlinks);
 static void eventq_init(void);
 static void readyq_init(void);
@@ -1434,6 +1437,9 @@ sim_load_prog(char *fname,		/* program to load */
   readyq_init();
   ruu_init();
   lsq_init();
+    /************* ECE 552 Modifying ****************/
+  storeSetMap_int();
+    /**************** ******************************/
 
   /* initialize the DLite debugger */
   dlite_init(simoo_reg_obj, simoo_mem_obj, simoo_mstate_obj);
@@ -1640,6 +1646,24 @@ ruu_dump(FILE *stream)				/* output stream */
 static struct RUU_station *LSQ;         /* load/store queue */
 static int LSQ_head, LSQ_tail;          /* LSQ head and tail pointers */
 static int LSQ_num;                     /* num entries currently in LSQ */
+static int LSQ_num;
+/************************ MODIFYING FOR 552 ****************************/
+struct Map{
+    int key;
+    int value[4];
+};
+
+static struct Map * storeSetMap;
+static int SSM_num;
+
+static void storeSetMap_int(){
+    storeSetMap = calloc(LSQ_size, sizeof(struct Map));
+    if (!storeSetMap)
+        fatal("out of virtual memory");
+    SSM_num = 0;
+}
+/*********************************  ********************************/
+
 
 /*
  * input dependencies for stores in the LSQ:
@@ -2525,6 +2549,8 @@ ruu_writeback(void)
    been satisfied, this is accomplished by walking the LSQ for loads, looking
    for blocking memory dependency condition (e.g., earlier store with an
    unknown address) */
+/************************************* MODIFYING FOR 552 ************************/
+
 #define MAX_STD_UNKNOWNS		64
 static void
 lsq_refresh(void)
@@ -2539,10 +2565,9 @@ lsq_refresh(void)
  /*******************************************************OUR PLAN ****************************************/
   /* CREATE A MAP THAT RELATES 1 load PC to 1 or more store PCs */
   /* If the load does not have any stores in its set, ADD THIS LOAD TO READY QUEUE*/
-  /* For the stores in a load set, check to see if the store is unresolved (steal their method */
+  /* For the stores in a load set, check to see if the store is unresolved (steal their method)*/
   // TODO: Figure out how to implement a map
 
- */   
 
   for (i=0, index=LSQ_head, n_std_unknowns=0;
        i < LSQ_num;
@@ -2558,7 +2583,7 @@ lsq_refresh(void)
 	      /* FIXME: a later STD + STD known could hide the STA unknown */
 	      /* sta unknown, blocks all later loads, stop search */
 	      /************************** Remove this break as an unknown load address is not a deal breaker *********************/
-	      /************************** But this would make the store unresolved so add it to the array of unkowns ************/
+	      /************************** But this would make the store unresolved so add it to the array of unknowns ************/
 
 	      break;
 	    }
@@ -2583,26 +2608,53 @@ lsq_refresh(void)
 	    }
 	}
 
-      if (/* load? */
+      if (/* load? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A LOAD ***********************/
 	  ((MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
-	  && /* queued? */!LSQ[index].queued
+	  && /* queued? */!LSQ[index].queued /******* AND THE LOAD HAS NOT YET BEEN QUEUED OR ISSUED OR COMPLETED ***********/
 	  && /* waiting? */!LSQ[index].issued
 	  && /* completed? */!LSQ[index].completed
-	  && /* regs ready? */OPERANDS_READY(&LSQ[index]))
+	  && /* regs ready? */OPERANDS_READY(&LSQ[index])) /****** AND THE REGISTERS ARE READY **********/
 	{
-	  /* no STA unknown conflict (because we got to this check), check for
-	     a STD unknown conflict */
+          /* ~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	  //no STA unknown conflict (because we got to this check), check for
+	   //  a STD unknown conflict
 	  for (j=0; j<n_std_unknowns; j++)
 	    {
-	      /* found a relevant STD unknown? */
+	      // found a relevant STD unknown?
 	      if (std_unknowns[j] == LSQ[index].addr)
 		break;
 	    }
 	  if (j == n_std_unknowns)
 	    {
-	      /* no STA or STD unknown conflicts, put load on ready queue */
+	      //no STA or STD unknown conflicts, put load on ready queue //
 	      readyq_enqueue(&LSQ[index]);
 	    }
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	    */
+          /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
+        struct Map* currMap = storeSetMap;
+        int iter;
+        int found= 0;
+        int * storeset;
+        for(iter=0; iter<SSM_num; iter++){
+            if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
+                found = 1;
+                storeset = currMap->value;
+                /*************** TODO: CHECK EACH STORE IN FLIGHT AGAINST THE LOAD ***********/
+            }
+            else{
+                currMap = currMap + 1;
+            }
+            
+        }
+        if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
+            readyq_enqueue(&LSQ[index]);
+        }
+
+
+
+
+
 	}
     }
 }
