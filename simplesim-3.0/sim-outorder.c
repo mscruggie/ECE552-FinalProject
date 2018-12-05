@@ -2555,8 +2555,10 @@ ruu_writeback(void)
 static void
 lsq_refresh(void)
 {
-  int i, j, index, n_std_unknowns;
+  int i, j, index, n_std_unknowns, n_sta_unknowns;
   md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
+  md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
+    
 
   /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
@@ -2569,43 +2571,68 @@ lsq_refresh(void)
   // TODO: Figure out how to implement a map
 
 
-  for (i=0, index=LSQ_head, n_std_unknowns=0;
+  for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0;
        i < LSQ_num;
        i++, index=(index + 1) % LSQ_size)
     {
       /* terminate search for ready loads after first unresolved store,
 	 as no later load could be resolved in its presence */
-      if (/* store? */
+      if (/* store? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A STORE ***********************/
 	  (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
 	{
+        /**************** OLD CODE ******************************
 	  if (!STORE_ADDR_READY(&LSQ[index]))
 	    {
-	      /* FIXME: a later STD + STD known could hide the STA unknown */
-	      /* sta unknown, blocks all later loads, stop search */
-	      /************************** Remove this break as an unknown load address is not a deal breaker *********************/
-	      /************************** But this would make the store unresolved so add it to the array of unknowns ************/
+	      // FIXME: a later STD + STD known could hide the STA unknown
+	      // sta unknown, blocks all later loads, stop search
 
 	      break;
 	    }
 	  else if (!OPERANDS_READY(&LSQ[index]))
 	    {
-	      /* sta known, but std unknown, may block a later store, record
-		 this address for later referral, we use an array here because
-		 for most simulations the number of entries to search will be
-		 very small */
+	      // sta known, but std unknown, may block a later store, record
+		 //this address for later referral, we use an array here because
+		 //for most simulations the number of entries to search will be
+		 //very small
 	      if (n_std_unknowns == MAX_STD_UNKNOWNS)
 		fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
 	      std_unknowns[n_std_unknowns++] = LSQ[index].addr;
 	    }
-	  else /* STORE_ADDR_READY() && OPERANDS_READY() */
+	  else // STORE_ADDR_READY() && OPERANDS_READY()
 	    {
-	      /* a later STD known hides an earlier STD unknown */
+	      // a later STD known hides an earlier STD unknown
 	      for (j=0; j<n_std_unknowns; j++)
 		{
-		  if (std_unknowns[j] == /* STA/STD known */LSQ[index].addr)
-		    std_unknowns[j] = /* bogus addr */0;
+		  if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
+		    std_unknowns[j] = 0; // bogus addr
 		}
-	    }
+	    }********************************************************/
+        if (!STORE_ADDR_READY(&LSQ[index]))
+        {
+            // sta unknown
+            if (n_sta_unknowns == MAX_STD_UNKNOWNS)
+                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+            sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
+        }
+        else if (!OPERANDS_READY(&LSQ[index]))
+        {
+            // sta known, but std unknown, may block a later store, record
+            //this address for later referral, we use an array here because
+            //for most simulations the number of entries to search will be
+            //very small
+            if (n_std_unknowns == MAX_STD_UNKNOWNS)
+                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+            std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+        }
+        else // STORE_ADDR_READY() && OPERANDS_READY()
+        {
+            // a later STD known hides an earlier STD unknown
+            for (j=0; j<n_std_unknowns; j++)
+            {
+                if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
+                    std_unknowns[j] = 0; // bogus addr
+            }
+        }
 	}
 
       if (/* load? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A LOAD ***********************/
@@ -2633,14 +2660,18 @@ lsq_refresh(void)
 	    */
           /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
         struct Map* currMap = storeSetMap;
-        int iter;
         int found= 0;
         int * storeset;
+        int iter;
         for(iter=0; iter<SSM_num; iter++){
             if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
                 found = 1;
                 storeset = currMap->value;
-                /*************** TODO: CHECK EACH STORE IN FLIGHT AGAINST THE LOAD ***********/
+                int iter2;
+                for(iter2=0; iter2 < 4; iter2++) {   /*************** TODO: CHECK EACH STORE IN FLIGHT AGAINST THE LOAD ***********/
+                    
+                    
+                }
             }
             else{
                 currMap = currMap + 1;
