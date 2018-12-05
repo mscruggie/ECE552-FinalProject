@@ -2555,9 +2555,10 @@ ruu_writeback(void)
 static void
 lsq_refresh(void)
 {
-  int i, j, index, n_std_unknowns, n_sta_unknowns;
+  int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
   md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
   md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
+  md_addr_t store_unresolved_PC[MAX_STD_UNKNOWNS];
     
 
   /* scan entire queue for ready loads: scan from oldest instruction
@@ -2571,7 +2572,7 @@ lsq_refresh(void)
   // TODO: Figure out how to implement a map
 
 
-  for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0;
+  for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0, n_store_unresolved=0;
        i < LSQ_num;
        i++, index=(index + 1) % LSQ_size)
     {
@@ -2613,6 +2614,9 @@ lsq_refresh(void)
             if (n_sta_unknowns == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
             sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
+            if (n_store_unresolved == MAX_STD_UNKNOWNS)
+                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+            store_unresolved_PC[n_store_unresolved++] = LSQ[index].PC;
         }
         else if (!OPERANDS_READY(&LSQ[index]))
         {
@@ -2623,14 +2627,19 @@ lsq_refresh(void)
             if (n_std_unknowns == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
             std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+            if (n_store_unresolved == MAX_STD_UNKNOWNS)
+                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+            store_unresolved_PC[n_store_unresolved++] = LSQ[index].PC;
         }
         else // STORE_ADDR_READY() && OPERANDS_READY()
         {
             // a later STD known hides an earlier STD unknown
             for (j=0; j<n_std_unknowns; j++)
             {
-                if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
+                if (std_unknowns[j] == LSQ[index].addr){ // STA/STD known
                     std_unknowns[j] = 0; // bogus addr
+                    store_unresolved_PC[j] = 0;
+                }
             }
         }
 	}
@@ -2667,10 +2676,24 @@ lsq_refresh(void)
             if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
                 found = 1;
                 storeset = currMap->value;
+                int conflict=0;
                 int iter2;
                 for(iter2=0; iter2 < 4; iter2++) {   /*************** TODO: CHECK EACH STORE IN FLIGHT AGAINST THE LOAD ***********/
-                    
-                    
+                    int iter3;
+                    for (iter3=0; iter3<n_store_unresolved; iter3++){
+                        // found a relevant store PC
+                        if (store_unresolved_PC[iter3] == LSQ[index].PC){
+                            conflict =1;
+                            break;
+                        }
+                    }
+                    if(conflict)
+                        break;
+                }
+                
+                if(!conflict){
+                    //no STA or STD unknown conflicts in store set, put load on ready queue //
+                    readyq_enqueue(&LSQ[index]);
                 }
             }
             else{
