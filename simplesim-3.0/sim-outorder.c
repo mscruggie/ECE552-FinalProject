@@ -2539,7 +2539,11 @@ ruu_writeback(void)
    } /* for all writeback events */
 
 }
-
+/********************** MODIFYING FOR 552 *************************/
+/* program counter */
+static md_addr_t pred_PC;
+static md_addr_t recover_PC;
+//////////////// move this to this location //////////////////////
 
 /*
  *  LSQ_REFRESH() - memory access dependence checker/scheduler
@@ -2691,6 +2695,24 @@ lsq_refresh(void)
                 
                 if(!conflict){
                     //no STA or STD unknown conflicts in store set, put load on ready queue //
+                    int trueConflict = 0;
+                    int iterTrueConflicts;
+                    for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
+                        if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
+                        || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
+                                (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+                        ) {
+                            trueConflict = 1;
+                            break;
+                        }
+                    }/*
+                    if(!spec_mode && trueConflict){
+                        spec_mode = TRUE;
+                        LSQ[iterTrueConflicts].recover_inst = TRUE;
+                        recover_PC = LSQ[index].PC;
+
+                    }*/
+
                     readyq_enqueue(&LSQ[index]);
                 }
                 break;
@@ -2701,6 +2723,26 @@ lsq_refresh(void)
             
         }
         if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
+
+            int trueConflict = 0;
+            int iterTrueConflicts;
+            for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
+                if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
+                   || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
+                       (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+                        ) {
+                    trueConflict = 1;
+                    break;
+                }
+            }
+            /*
+            if(!spec_mode && trueConflict){
+                printf("Found conflict")
+                spec_mode = TRUE;
+                LSQ[iterTrueConflicts].recover_inst = TRUE;
+                recover_PC = LSQ[index].PC;
+
+            }*/
             readyq_enqueue(&LSQ[index]);
         }
 
@@ -3045,10 +3087,6 @@ static struct spec_mem_ent *store_htable[STORE_HASH_SIZE];
 /* speculative memory hash table bucket free list */
 static struct spec_mem_ent *bucket_free_list = NULL;
 
-
-/* program counter */
-static md_addr_t pred_PC;
-static md_addr_t recover_PC;
 
 /* fetch unit next fetch address */
 static md_addr_t fetch_regs_PC;
