@@ -2558,7 +2558,7 @@ lsq_refresh(void)
   int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
   md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
   md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
-  md_addr_t store_unresolved_PC[MAX_STD_UNKNOWNS]; // store_unresolved_PC is an array of the stores PCs for which we do not know either the data or address or both
+  int store_unresolved_index[MAX_STD_UNKNOWNS]; // store_unresolved_index is an array of the stores PCs for which we do not know either the data or address or both
     
 
   /* scan entire queue for ready loads: scan from oldest instruction
@@ -2611,7 +2611,7 @@ lsq_refresh(void)
             sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
             if (n_store_unresolved == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            store_unresolved_PC[n_store_unresolved++] = LSQ[index].PC;
+            store_unresolved_index[n_store_unresolved++] = index;
         }
         else if (!OPERANDS_READY(&LSQ[index]))
         {
@@ -2621,7 +2621,7 @@ lsq_refresh(void)
             std_unknowns[n_std_unknowns++] = LSQ[index].addr;
             if (n_store_unresolved == MAX_STD_UNKNOWNS)
                 fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            store_unresolved_PC[n_store_unresolved++] = LSQ[index].PC;
+            store_unresolved_index[n_store_unresolved++] = index;
         }
         else // STORE_ADDR_READY() && OPERANDS_READY()
         {
@@ -2630,7 +2630,7 @@ lsq_refresh(void)
             {
                 if (std_unknowns[j] == LSQ[index].addr){ // STA/STD known
                     std_unknowns[j] = 0; // bogus addr
-                    store_unresolved_PC[j] = 0;
+                    store_unresolved_index[j] = 0;
                 }
             }
         }
@@ -2673,11 +2673,16 @@ lsq_refresh(void)
                 for(iter2=0; iter2 < 4; iter2++) {   // iterate throught the store set
                     int iter3;
                     for (iter3=0; iter3<n_store_unresolved; iter3++){ // check to see if a particular store in the set is in flight
-                        if (store_unresolved_PC[iter3] == LSQ[index].PC){
-                            //TODO: if the address is known and it's not the same as load address, do not make it a conflict
-                            // TODO: so it would be ideal if the PCs and the addresses were together in a pair to access them cuncurrently in some combination of the std_unknown address and store_unresolved PC
-                            conflict =1;
-                            break;
+                        if (LSQ[store_unresolved_index[iter3]].PC == LSQ[index].PC){
+                            // Do not consider it a conflict if the address for the store is known and it does not match the address for the load
+                            if(STORE_ADDR_READY(&LSQ[store_unresolved_index[iter3]]) &&
+                               LSQ[store_unresolved_index[iter3]].addr != LSQ[index].addr){
+                                break;
+                            }
+                            else{
+                                conflict =1;
+                                break;
+                            }
                         }
                     }
                     if(conflict)
