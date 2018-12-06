@@ -2319,15 +2319,19 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
   LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
 
   /* traverse to older insts until the mispredicted branch is encountered */
+  //printf("*********************");
   while (RUU_index != branch_index)
     {
+      //printf(" RUU INDEX %d \n", RUU_index);
+      //printf("BRANCH INDEX %d\n", branch_index);
+
       /* the RUU should not drain since the mispredicted branch will remain */
       if (!RUU_num)
 	panic("empty RUU");
 
       /* should meet up with the tail first */
       if (RUU_index == RUU_head)
-	panic("RUU head and tail broken");
+	panic("RUU head and tail broken %d", branch_index );
 
       /* is this operation an effective addr calc for a load or store? */
       if (RUU[RUU_index].ea_comp)
@@ -2420,13 +2424,26 @@ ruu_writeback(void)
       /* does this operation reveal a mis-predicted branch? */
       if (rs->recover_inst)
 	{
-	  if (rs->in_LSQ)
-	    panic("mis-predicted load or store?!?!?");
+
+	  if (rs->in_LSQ) {
+         // panic("mis-predicted load or store?!?!?");
+
+      }
+
 
 	  /* recover processor state and reinit fetch to correct path */
-	  ruu_recover(rs - RUU);
-	  tracer_recover();
-	  bpred_recover(pred, rs->PC, rs->stack_recover_idx);
+        /*
+	  int int_rs = (int) rs;
+	  int int_ruu = (int) RUU;
+	        printf("RS %d\n", int_rs);
+	        printf("RUU %d\n", int_ruu);
+	        int  diff = rs-RUU;
+	        printf("DIFF %d\n", diff);
+	        printf("SIZE %lu", sizeof(struct RUU_station));*/
+          ruu_recover(rs - RUU);
+          tracer_recover();
+          bpred_recover(pred, rs->PC, rs->stack_recover_idx);
+
 
 	  /* stall fetch until I-fetch and I-decode recover */
 	  ruu_fetch_issue_delay = ruu_branch_penalty;
@@ -2559,192 +2576,319 @@ static md_addr_t recover_PC;
 static void
 lsq_refresh(void)
 {
-  int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
-  md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
-  md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
-  int store_unresolved_index[MAX_STD_UNKNOWNS]; // store_unresolved_index is an array of the stores PCs for which we do not know either the data or address or both
+    int i, j, index, n_std_unknowns;
+    md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
     
-
-  /* scan entire queue for ready loads: scan from oldest instruction
+    /* scan entire queue for ready loads: scan from oldest instruction
      (head) until we reach the tail or an unresolved store, after which no
      other instruction will become ready */
-
-
-  for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0, n_store_unresolved=0;
-       i < LSQ_num;
-       i++, index=(index + 1) % LSQ_size)
+    
+    
+    for (i=0, index=LSQ_head, n_std_unknowns=0;
+         i < LSQ_num;
+         i++, index=(index + 1) % LSQ_size)
     {
-      /* terminate search for ready loads after first unresolved store,
-	 as no later load could be resolved in its presence */
-      if (/* store? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A STORE ***********************/
-	  (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
-	{
-        /*~~~~~~~~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	  if (!STORE_ADDR_READY(&LSQ[index]))
-	    {
-	      // FIXME: a later STD + STD known could hide the STA unknown
-	      // sta unknown, blocks all later loads, stop search
-
-	      break;
-	    }
-	  else if (!OPERANDS_READY(&LSQ[index]))
-	    {
-	      // sta known, but std unknown, may block a later store, record
-		 //this address for later referral, we use an array here because
-		 //for most simulations the number of entries to search will be
-		 //very small
-	      if (n_std_unknowns == MAX_STD_UNKNOWNS)
-		fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-	      std_unknowns[n_std_unknowns++] = LSQ[index].addr;
-	    }
-	  else // STORE_ADDR_READY() && OPERANDS_READY()
-	    {
-	      // a later STD known hides an earlier STD unknown
-	      for (j=0; j<n_std_unknowns; j++)
-		{
-		  if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
-		    std_unknowns[j] = 0; // bogus addr
-		}
-	    }~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-        
-        if (!STORE_ADDR_READY(&LSQ[index]))
+        /* terminate search for ready loads after first unresolved store,
+         as no later load could be resolved in its presence */
+        if (/* store? */
+            (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
         {
-            /************** ADDRESS IS UNKOWN  ******ADD TO STA ARRAY AND UNRESOLVED ARRAY**************/
-            if (n_sta_unknowns == MAX_STD_UNKNOWNS)
-                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
-            if (n_store_unresolved == MAX_STD_UNKNOWNS)
-                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            store_unresolved_index[n_store_unresolved++] = index;
-        }
-        else if (!OPERANDS_READY(&LSQ[index]))
-        {
-            /********** DATA IS UNKNOWN ***********ADD TO STD ARRAY AND UNRESOLVED ARRAY******/
-            if (n_std_unknowns == MAX_STD_UNKNOWNS)
-                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            std_unknowns[n_std_unknowns++] = LSQ[index].addr;
-            if (n_store_unresolved == MAX_STD_UNKNOWNS)
-                fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
-            store_unresolved_index[n_store_unresolved++] = index;
-        }
-        else // STORE_ADDR_READY() && OPERANDS_READY()
-        {
-            // a later STD known hides an earlier STD unknown
-            for (j=0; j<n_std_unknowns; j++)
+            if (!STORE_ADDR_READY(&LSQ[index]))
             {
-                if (std_unknowns[j] == LSQ[index].addr){ // STA/STD known
-                    std_unknowns[j] = 0; // bogus addr
-                    store_unresolved_index[j] = 0;
+                /* FIXME: a later STD + STD known could hide the STA unknown */
+                /* sta unknown, blocks all later loads, stop search */
+                /************************** Remove this break as an unknown load address is not a deal breaker *********************/
+                /************************** But this would make the store unresolved so add it to the array of unkowns ************/
+                
+                break;
+            }
+            else if (!OPERANDS_READY(&LSQ[index]))
+            {
+                /* sta known, but std unknown, may block a later store, record
+                 this address for later referral, we use an array here because
+                 for most simulations the number of entries to search will be
+                 very small */
+                if (n_std_unknowns == MAX_STD_UNKNOWNS)
+                    fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+            }
+            else /* STORE_ADDR_READY() && OPERANDS_READY() */
+            {
+                /* a later STD known hides an earlier STD unknown */
+                for (j=0; j<n_std_unknowns; j++)
+                {
+                    if (std_unknowns[j] == /* STA/STD known */LSQ[index].addr)
+                        std_unknowns[j] = /* bogus addr */0;
                 }
             }
         }
-	}
-
-      if (/* load? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A LOAD ***********************/
-	  ((MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
-	  && /* queued? */!LSQ[index].queued /******* AND THE LOAD HAS NOT YET BEEN QUEUED OR ISSUED OR COMPLETED ***********/
-	  && /* waiting? */!LSQ[index].issued
-	  && /* completed? */!LSQ[index].completed
-	  && /* regs ready? */OPERANDS_READY(&LSQ[index])) /****** AND THE REGISTERS ARE READY **********/
-	{
-          /* ~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	  //no STA unknown conflict (because we got to this check), check for
-	   //  a STD unknown conflict
-	  for (j=0; j<n_std_unknowns; j++)
-	    {
-	      // found a relevant STD unknown?
-	      if (std_unknowns[j] == LSQ[index].addr)
-		break;
-	    }
-	  if (j == n_std_unknowns)
-	    {
-	      //no STA or STD unknown conflicts, put load on ready queue //
-	      readyq_enqueue(&LSQ[index]);
-	    }
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-	    */
-          /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
-        struct Map* currMap = storeSetMap;
-        int found= 0; // initialize found to NOT FOUND
-        int * storeset;
-        int iter;
-        for(iter=0; iter<SSM_num; iter++){// iterate through the map
-            if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
-                found = 1;
-                storeset = currMap->value;
-                int conflict=0; // initialize conflictness to NO CONFLICT
-                int iter2;
-                for(iter2=0; iter2 < 4; iter2++) {   // iterate throught the store set
-                    int iter3;
-                    for (iter3=0; iter3<n_store_unresolved; iter3++){ // check to see if a particular store in the set is in flight
-                        if (LSQ[store_unresolved_index[iter3]].PC == LSQ[index].PC){
-                            // Do not consider it a conflict if the address for the store is known and it does not match the address for the load
-                            if(STORE_ADDR_READY(&LSQ[store_unresolved_index[iter3]]) &&
-                               LSQ[store_unresolved_index[iter3]].addr != LSQ[index].addr){
-                                break;
-                            }
-                            else{
-                                conflict =1;
-                                break;
+        
+        if (/* load? */
+            ((MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
+            && /* queued? */!LSQ[index].queued
+            && /* waiting? */!LSQ[index].issued
+            && /* completed? */!LSQ[index].completed
+            && /* regs ready? */OPERANDS_READY(&LSQ[index]))
+        {
+            /* no STA unknown conflict (because we got to this check), check for
+             a STD unknown conflict */
+            for (j=0; j<n_std_unknowns; j++)
+            {
+                /* found a relevant STD unknown? */
+                if (std_unknowns[j] == LSQ[index].addr)
+                    break;
+            }
+            if (j == n_std_unknowns)
+            {
+                /* no STA or STD unknown conflicts, put load on ready queue */
+                readyq_enqueue(&LSQ[index]);
+            }
+        }
+    }
+}
+        
+        static void
+        load_issue(void)
+        {
+            int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
+            md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
+            md_addr_t sta_unknowns[MAX_STD_UNKNOWNS];
+            int store_unresolved_index[MAX_STD_UNKNOWNS]; // store_unresolved_index is an array of the stores PCs for which we do not know either the data or address or both
+            
+            
+            /* scan entire queue for ready loads: scan from oldest instruction
+             (head) until we reach the tail or an unresolved store, after which no
+             other instruction will become ready */
+            
+            
+            for (i=0, index=LSQ_head, n_std_unknowns=0, n_sta_unknowns=0, n_store_unresolved=0;
+                 i < LSQ_num;
+                 i++, index=(index + 1) % LSQ_size)
+            {
+                /* terminate search for ready loads after first unresolved store,
+                 as no later load could be resolved in its presence */
+                if (/* store? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A STORE ***********************/
+                    (MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_STORE)) == (F_MEM|F_STORE))
+                {
+                    /*~~~~~~~~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                     if (!STORE_ADDR_READY(&LSQ[index]))
+                     {
+                     // FIXME: a later STD + STD known could hide the STA unknown
+                     // sta unknown, blocks all later loads, stop search
+                     
+                     break;
+                     }
+                     else if (!OPERANDS_READY(&LSQ[index]))
+                     {
+                     // sta known, but std unknown, may block a later store, record
+                     //this address for later referral, we use an array here because
+                     //for most simulations the number of entries to search will be
+                     //very small
+                     if (n_std_unknowns == MAX_STD_UNKNOWNS)
+                     fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                     std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+                     }
+                     else // STORE_ADDR_READY() && OPERANDS_READY()
+                     {
+                     // a later STD known hides an earlier STD unknown
+                     for (j=0; j<n_std_unknowns; j++)
+                     {
+                     if (std_unknowns[j] == LSQ[index].addr) // STA/STD known
+                     std_unknowns[j] = 0; // bogus addr
+                     }
+                     }~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+                    
+                    if (!STORE_ADDR_READY(&LSQ[index]))
+                    {
+                        /************** ADDRESS IS UNKOWN  ******ADD TO STA ARRAY AND UNRESOLVED ARRAY**************/
+                        if (n_sta_unknowns == MAX_STD_UNKNOWNS)
+                            fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                        sta_unknowns[n_sta_unknowns++] = LSQ[index].addr;
+                        if (n_store_unresolved == MAX_STD_UNKNOWNS)
+                            fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                        store_unresolved_index[n_store_unresolved++] = index;
+                    }
+                    else if (!OPERANDS_READY(&LSQ[index]))
+                    {
+                        /********** DATA IS UNKNOWN ***********ADD TO STD ARRAY AND UNRESOLVED ARRAY******/
+                        if (n_std_unknowns == MAX_STD_UNKNOWNS)
+                            fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                        std_unknowns[n_std_unknowns++] = LSQ[index].addr;
+                        if (n_store_unresolved == MAX_STD_UNKNOWNS)
+                            fatal("STD unknown array overflow, increase MAX_STD_UNKNOWNS");
+                        store_unresolved_index[n_store_unresolved++] = index;
+                    }
+                    else // STORE_ADDR_READY() && OPERANDS_READY()
+                    {
+                        // a later STD known hides an earlier STD unknown
+                        for (j=0; j<n_std_unknowns; j++)
+                        {
+                            if (std_unknowns[j] == LSQ[index].addr){ // STA/STD known
+                                std_unknowns[j] = 0; // bogus addr
+                                store_unresolved_index[j] = 0;
                             }
                         }
                     }
-                    if(conflict)
-                        break;
                 }
                 
-                if(!conflict){
-                    //no STA or STD unknown conflicts in store set, put load on ready queue //
-                    int trueConflict = 0;
-                    int iterTrueConflicts;
-                    for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
-                        if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
-                        || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
-                                (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
-                        ) {
-                            trueConflict = 1;
+                if (/* load? */ /**************** IF THE CURRENT MEMORY OP IN THE LSQ IS A LOAD ***********************/
+                    ((MD_OP_FLAGS(LSQ[index].op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))
+                    && /* queued? */!LSQ[index].queued /******* AND THE LOAD HAS NOT YET BEEN QUEUED OR ISSUED OR COMPLETED ***********/
+                    && /* waiting? */!LSQ[index].issued
+                    && /* completed? */!LSQ[index].completed
+                    && /* regs ready? */OPERANDS_READY(&LSQ[index])) /****** AND THE REGISTERS ARE READY **********/
+                {
+                    /* ~~~~~~~~~~~~~~~OLD CODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                     //no STA unknown conflict (because we got to this check), check for
+                     //  a STD unknown conflict
+                     for (j=0; j<n_std_unknowns; j++)
+                     {
+                     // found a relevant STD unknown?
+                     if (std_unknowns[j] == LSQ[index].addr)
+                     break;
+                     }
+                     if (j == n_std_unknowns)
+                     {
+                     //no STA or STD unknown conflicts, put load on ready queue //
+                     readyq_enqueue(&LSQ[index]);
+                     }
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                     */
+                    /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
+                    struct Map* currMap = storeSetMap;
+                    int found= 0; // initialize found to NOT FOUND
+                    int * storeset;
+                    int iter;
+                    for(iter=0; iter<SSM_num; iter++){// iterate through the map
+                        if(currMap->key == LSQ[index].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
+                            found = 1;
+                            storeset = currMap->value;
+                            int conflict=0; // initialize conflictness to NO CONFLICT
+                            int iter2;
+                            for(iter2=0; iter2 < 4; iter2++) {   // iterate throught the store set
+                                int iter3;
+                                for (iter3=0; iter3<n_store_unresolved; iter3++){ // check to see if a particular store in the set is in flight
+                                    if (LSQ[store_unresolved_index[iter3]].PC == storeset[iter2]){
+                                        // Do not consider it a conflict if the address for the store is known and it does not match the address for the load
+                                        if(STORE_ADDR_READY(&LSQ[store_unresolved_index[iter3]]) &&
+                                           LSQ[store_unresolved_index[iter3]].addr != LSQ[index].addr){
+                                            break;
+                                        }
+                                        else{
+                                            conflict =1;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if(conflict)
+                                    break;
+                            }
+                            
+                            if(!conflict){
+                                //no STA or STD unknown conflicts in store set, put load on ready queue //
+                                int trueConflict = 0;
+                                int iterTrueConflicts;
+                                for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
+                                    if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
+                                       || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
+                                           (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+                                       ) {
+                                        trueConflict = 1;
+                                        break;
+                                    }
+                                }
+                                if(spec_mode==FALSE && trueConflict){
+                                    printf("SPEC");
+                                    spec_mode = TRUE;
+                                    if(!spec_mode){
+                                        panic("just set spec mode");
+                                    }
+                                    int m;
+                                    for(m=0; m< RUU_num; m++){
+                                        if(RUU[m].slip == LSQ[index].slip){
+                                            RUU[m].recover_inst = TRUE;
+                                            RUU[m].spec_mode = TRUE;
+                                            break;
+                                        }
+                                    }
+                                    recover_PC = LSQ[index].PC;
+                                    int ssm_iter;
+                                    for(ssm_iter=0; ssm_iter < SSM_num; ssm_iter++ ) {
+                                        if(storeSetMap[ssm_iter].key == LSQ[index].PC){
+                                            int * values = storeSetMap[ssm_iter].value;
+                                            int itervalues;
+                                            for(itervalues=0; itervalues < 3; itervalues++) {
+                                                if (*values == 0) {
+                                                    *values = LSQ[iterTrueConflicts].PC;
+                                                    break;
+                                                } else {
+                                                    values = values + 1;
+                                                }
+                                            }
+                                            break;
+                                            
+                                        }
+                                    }
+                                }
+                                
+                                readyq_enqueue(&LSQ[index]);
+                            }
                             break;
                         }
-                    }/*
-                    if(!spec_mode && trueConflict){
-                        spec_mode = TRUE;
-                        LSQ[iterTrueConflicts].recover_inst = TRUE;
-                        recover_PC = LSQ[index].PC;
-
-                    }*/
-
-                    readyq_enqueue(&LSQ[index]);
-                }
-                break;
-            }
-            else{
-                currMap = currMap + 1; // keep looking through map if not found
-            }
-            
-        }
-        if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
-
-            int trueConflict = 0;
-            int iterTrueConflicts;
-            for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
-                if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
-                   || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
-                       (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
-                        ) {
-                    trueConflict = 1;
-                    break;
-                }
-            }
-            /*
-            if(!spec_mode && trueConflict){
-                printf("Found conflict")
-                spec_mode = TRUE;
-                LSQ[iterTrueConflicts].recover_inst = TRUE;
-                recover_PC = LSQ[index].PC;
-
-            }*/
-            readyq_enqueue(&LSQ[index]);
-        }
+                        else{
+                            currMap = currMap + 1; // keep looking through map if not found
+                        }
+                        
+                    }
+                    if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
+                        
+                        int trueConflict = 0;
+                        int iterTrueConflicts;
+                        for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
+                            if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
+                               || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
+                                   (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+                               ) {
+                                trueConflict = 1;
+                                break;
+                            }
+                        }
+                        if(spec_mode==FALSE && trueConflict){
+                            printf("SPEC");
+                            spec_mode = TRUE;
+                            if(!spec_mode){
+                                panic("just set spec mode");
+                            }
+                            int m;
+                            for(m=0; m< RUU_num; m++){
+                                if(RUU[m].slip == LSQ[index].slip){
+                                    RUU[m].recover_inst = TRUE;
+                                    RUU[m].spec_mode = TRUE;
+                                    break;
+                                }
+                            }
+                            
+                            recover_PC = LSQ[index].PC;
+                            int ssm_iter;
+                            for(ssm_iter=0; ssm_iter < SSM_num; ssm_iter++ ) {
+                                if(storeSetMap[ssm_iter].key == LSQ[index].PC){
+                                    int * values = storeSetMap[ssm_iter].value;
+                                    int itervalues;
+                                    for(itervalues=0; itervalues < 3; itervalues++) {
+                                        if (*values == 0) {
+                                            *values = LSQ[iterTrueConflicts].PC;
+                                            break;
+                                        } else {
+                                            values = values + 1;
+                                        }
+                                    }
+                                    break;
+                                    
+                                }
+                            }
+                        }
+                        readyq_enqueue(&LSQ[index]);
+                    }
 
 
 
