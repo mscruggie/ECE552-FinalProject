@@ -337,6 +337,12 @@ static counter_t RUU_count;		/* cumulative RUU occupancy */
 static counter_t RUU_fcount;		/* cumulative RUU full count */
 static counter_t LSQ_count;		/* cumulative LSQ occupancy */
 static counter_t LSQ_fcount;		/* cumulative LSQ full count */
+static counter_t load_mispredicts;
+static counter_t total_load_speculations;
+static counter_t false_dep;
+
+//load_mispredicts = 0;
+//total_load_speculations = 0;
 
 /* total non-speculative bogus addresses seen (debug var) */
 static counter_t sim_invalid_addrs;
@@ -1284,6 +1290,15 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
                      "lsq_occupancy / lsq_rate", /* format */NULL);
     stat_reg_formula(sdb, "lsq_full", "fraction of time (cycle's) LSQ was full",
                      "LSQ_fcount / sim_cycle", /* format */NULL);
+    stat_reg_counter(sdb, "total_load_speculations", "total number of speculated loads",
+                     &total_load_speculations, /* initial value */0, /* format */NULL);
+    stat_reg_counter(sdb, "load_mispredicts", "total number of mispredicted loads",
+                     &load_mispredicts, /* initial value */0, /* format */NULL);
+    stat_reg_counter(sdb, "total_false_deps", "total number of falsely dependent loads",
+                     &false_dep, /* initial value */0, /* format */NULL);
+    stat_reg_formula(sdb, "store_set_mispred_rate",
+                     "rate of store mispredicts (%)",
+                     "load_mispredicts / total_load_speculations", NULL);
     
     stat_reg_counter(sdb, "sim_slip",
                      "total number of slip cycles",
@@ -1553,6 +1568,9 @@ ruu_init(void)
     RUU_head = RUU_tail = 0;
     RUU_count = 0;
     RUU_fcount = 0;
+    load_mispredicts = 0;
+    total_load_speculations = 0;
+    false_dep=0;
 }
 
 /* dump the contents of the RUU */
@@ -1650,15 +1668,15 @@ static int LSQ_num;                     /* num entries currently in LSQ */
 static int LSQ_num;
 /************************ MODIFYING FOR 552 ****************************/
 struct Map{
-    int key;
-    int value[8];
+    md_addr_t key;
+    md_addr_t value[8];
 };
 
 static struct Map * storeSetMap;
 static int SSM_num;
 
 static void storeSetMap_int(){
-    storeSetMap = calloc(LSQ_size, sizeof(struct Map));
+    storeSetMap = calloc(10000000, sizeof(struct Map));
     if (!storeSetMap)
         fatal("out of virtual memory");
     SSM_num = 0;
@@ -2581,6 +2599,7 @@ static md_addr_t recover_PC;
 static void
 lsq_refresh(void)
 {
+    //printf("refreshing\n");
     int i, j, index, n_std_unknowns;
     md_addr_t std_unknowns[MAX_STD_UNKNOWNS];
     
@@ -2654,7 +2673,7 @@ lsq_refresh(void)
         }
     }
 }
-
+int return_array[2];
 static int* load_issue(int currentLoadIndex)
 {
     int i, j, index, n_std_unknowns, n_sta_unknowns, n_store_unresolved;
@@ -2716,14 +2735,14 @@ static int* load_issue(int currentLoadIndex)
     
     /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
     //printf("here1\n");
-    int return_array[2];
     struct Map* currMap = storeSetMap;
     int found= 0; // initialize found to NOT FOUND
-    int * storeset;
+    md_addr_t * storeset;
     int iter;
     for(iter=0; iter<SSM_num; iter++){// iterate through the map
         if(currMap->key == LSQ[currentLoadIndex].PC){ /**********CHECK TO SEE IF LOAD IS AT THIS SPOT IN MAP ********/
             found = 1;
+            //printf("FOUND");
             storeset = currMap->value;
             int conflict=0; // initialize conflictness to NO CONFLICT
             int iter2;
@@ -2751,9 +2770,8 @@ static int* load_issue(int currentLoadIndex)
                 int trueConflict = 0;
                 int iterTrueConflicts;
                 for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
-                    if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
-                       || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
-                           (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+                    if(((LSQ[store_unresolved_index[iterTrueConflicts]].addr == LSQ[currentLoadIndex].addr)
+                        && (!OPERANDS_READY(&LSQ[store_unresolved_index[iterTrueConflicts]])))
                        ) {
                         trueConflict = 1;
                         break;
@@ -2763,7 +2781,7 @@ static int* load_issue(int currentLoadIndex)
                 int ssm_iter;
                 for(ssm_iter=0; ssm_iter < SSM_num; ssm_iter++ ) {
                     if(storeSetMap[ssm_iter].key == LSQ[currentLoadIndex].PC){
-                        int * values = storeSetMap[ssm_iter].value;
+                        md_addr_t * values = storeSetMap[ssm_iter].value;
                         int itervalues;
                         for(itervalues=0; itervalues < 8; itervalues++) {
                             if (*values == 0) {
@@ -2777,6 +2795,15 @@ static int* load_issue(int currentLoadIndex)
                         
                     }
                 }
+                //printf("SSM_ITER: %d \n",ssm_iter);
+                if(ssm_iter == SSM_num && trueConflict == 1){
+                    //printf("Adding value to existing store set\n");
+                    storeSetMap[SSM_num].key = LSQ[currentLoadIndex].PC;
+                    storeSetMap[SSM_num].value[0] = LSQ[iterTrueConflicts].PC;
+                    //SSM_num = 1;
+                    SSM_num++;
+                    
+                }
                 
                 //readyq_enqueue(&LSQ[currentLoadIndex]);
                 return_array[0] = 1;
@@ -2789,24 +2816,24 @@ static int* load_issue(int currentLoadIndex)
         }
         
     }
-    // printf("here2\n");
+     //printf("here2.0\n");
     if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
         
         int trueConflict = 0;
         int iterTrueConflicts;
         for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
-            if(( (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) && (STORE_ADDR_READY(&LSQ[iterTrueConflicts])))
-               || (STORE_ADDR_READY(&LSQ[iterTrueConflicts]) && (LSQ[n_store_unresolved].addr == LSQ[iterTrueConflicts].addr) &&
-                   (!OPERANDS_READY(&LSQ[iterTrueConflicts])))
+            if(((LSQ[store_unresolved_index[iterTrueConflicts]].addr == LSQ[currentLoadIndex].addr)
+                && (!OPERANDS_READY(&LSQ[store_unresolved_index[iterTrueConflicts]])))
                ) {
                 trueConflict = 1;
                 break;
             }
         }
+        //printf("here2\n");
         int ssm_iter;
         for(ssm_iter=0; ssm_iter < SSM_num; ssm_iter++ ) {
             if(storeSetMap[ssm_iter].key == LSQ[currentLoadIndex].PC){
-                int * values = storeSetMap[ssm_iter].value;
+                md_addr_t * values = storeSetMap[ssm_iter].value;
                 int itervalues;
                 for(itervalues=0; itervalues < 3; itervalues++) {
                     if (*values == 0) {
@@ -2820,6 +2847,17 @@ static int* load_issue(int currentLoadIndex)
                 
             }
         }
+        
+       
+        //printf("here2.5\n");
+        if(ssm_iter == SSM_num && trueConflict == 1){
+            //printf("Adding value to store set\n");
+            storeSetMap[SSM_num].key = LSQ[currentLoadIndex].PC;
+            storeSetMap[SSM_num].value[0] = LSQ[iterTrueConflicts].PC;
+            SSM_num++;
+            //SSM_num = 1;
+            
+        }
          //printf("here3\n");
         //readyq_enqueue(&LSQ[currentLoadIndex]);
         // printf("here4\n");
@@ -2829,8 +2867,18 @@ static int* load_issue(int currentLoadIndex)
         return return_array;
     }
      //printf("here6\n");
+    int trueConflict = 0;
+    int iterTrueConflicts;
+    for(iterTrueConflicts =0; iterTrueConflicts < n_store_unresolved; iterTrueConflicts++){
+        if(((LSQ[store_unresolved_index[iterTrueConflicts]].addr == LSQ[currentLoadIndex].addr)
+            && (!OPERANDS_READY(&LSQ[store_unresolved_index[iterTrueConflicts]])))
+           ) {
+            trueConflict = 1;
+            break;
+        }
+    }
     return_array[0] = 0;
-    return_array[1] = 0;
+    return_array[1] = trueConflict;
      //printf("here7\n");
     return return_array;
 }
@@ -4250,6 +4298,14 @@ break;							\
                 /************ Modifying for 552 ***************/
                 if (((MD_OP_FLAGS(op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))){
                     results = load_issue(old_lsq_tail); // added the old_lsq_variable so i can pass in the lsq index
+                    if (results[0] == 1){
+                        total_load_speculations++;
+                    } if (results[1] == 1) {
+                        load_mispredicts++;
+                    }
+                    if(results[0] ==0 && results[1] == 0){
+                        false_dep++;
+                    }
                    // printf("SPEC");
                 }
                 /************** **********************************/

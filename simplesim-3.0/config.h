@@ -1,1 +1,1 @@
-target-alpha/config.h
+/* config.h - SimpleS
