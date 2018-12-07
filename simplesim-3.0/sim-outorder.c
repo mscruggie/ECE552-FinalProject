@@ -1650,7 +1650,7 @@ static int LSQ_num;
 /************************ MODIFYING FOR 552 ****************************/
 struct Map{
     int key;
-    int value[4];
+    int value[8];
 };
 
 static struct Map * storeSetMap;
@@ -2307,6 +2307,7 @@ ruu_commit(void)
 static void
 ruu_recover(int branch_index)			/* index of mis-pred branch */
 {
+    //printf("%d\n", branch_index);
     int i, RUU_index = RUU_tail, LSQ_index = LSQ_tail;
     int RUU_prev_tail = RUU_tail, LSQ_prev_tail = LSQ_tail;
     
@@ -2321,6 +2322,97 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
     /* traverse to older insts until the mispredicted branch is encountered */
     //printf("*********************");
     while (RUU_index != branch_index)
+    {
+        //printf(" RUU INDEX %d \n", RUU_index);
+        //printf("BRANCH INDEX %d\n", branch_index);
+        
+        /* the RUU should not drain since the mispredicted branch will remain */
+        if (!RUU_num)
+            panic("empty RUU");
+        
+        /* should meet up with the tail first */
+        if (RUU_index == RUU_head)
+            panic("RUU head and tail broken %d", branch_index );
+        
+        /* is this operation an effective addr calc for a load or store? */
+        if (RUU[RUU_index].ea_comp)
+        {
+            /* should be at least one load or store in the LSQ */
+            if (!LSQ_num)
+                panic("RUU and LSQ out of sync");
+            
+            /* recover any resources consumed by the load or store operation */
+            for (i=0; i<MAX_ODEPS; i++)
+            {
+                RSLINK_FREE_LIST(LSQ[LSQ_index].odep_list[i]);
+                /* blow away the consuming op list */
+                LSQ[LSQ_index].odep_list[i] = NULL;
+            }
+            
+            /* squash this LSQ entry */
+            LSQ[LSQ_index].tag++;
+            
+            /* indicate in pipetrace that this instruction was squashed */
+            ptrace_endinst(LSQ[LSQ_index].ptrace_seq);
+            
+            /* go to next earlier LSQ slot */
+            LSQ_prev_tail = LSQ_index;
+            LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
+            LSQ_num--;
+        }
+        
+        /* recover any resources used by this RUU operation */
+        for (i=0; i<MAX_ODEPS; i++)
+        {
+            RSLINK_FREE_LIST(RUU[RUU_index].odep_list[i]);
+            /* blow away the consuming op list */
+            RUU[RUU_index].odep_list[i] = NULL;
+        }
+        
+        /* squash this RUU entry */
+        RUU[RUU_index].tag++;
+        
+        /* indicate in pipetrace that this instruction was squashed */
+        ptrace_endinst(RUU[RUU_index].ptrace_seq);
+        
+        /* go to next earlier slot in the RUU */
+        RUU_prev_tail = RUU_index;
+        RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
+        RUU_num--;
+    }
+    
+    /* reset head/tail pointers to point to the mis-predicted branch */
+    RUU_tail = RUU_prev_tail;
+    LSQ_tail = LSQ_prev_tail;
+    
+    /* revert create vector back to last precise create vector state, NOTE:
+     this is accomplished by resetting all the copied-on-write bits in the
+     USE_SPEC_CV bit vector */
+    BITMAP_CLEAR_MAP(use_spec_cv, CV_BMAP_SZ);
+    
+    /* FIXME: could reset functional units at squash time */
+}
+
+/* recover processor microarchitecture state back to point of the
+mis-predicted branch at RUU[BRANCH_INDEX] */
+static void
+ruu_recover_lsq(int branch_index)            /* index of mis-pred branch */
+{
+    //printf("%d\n", branch_index);
+    int i, RUU_index = RUU_tail, LSQ_index = LSQ_tail;
+    int RUU_prev_tail = RUU_tail, LSQ_prev_tail = LSQ_tail;
+    
+    /* recover from the tail of the RUU towards the head until the branch index
+     is reached, this direction ensures that the LSQ can be synchronized with
+     the RUU */
+    
+    /* go to first element to squash */
+    RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
+    LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
+    
+    /* traverse to older insts until the mispredicted branch is encountered */
+    //printf("*********************");
+    while (LSQ_index != branch_index)
     {
         //printf(" RUU INDEX %d \n", RUU_index);
         //printf("BRANCH INDEX %d\n", branch_index);
@@ -2426,8 +2518,8 @@ ruu_writeback(void)
         {
             
             if (rs->in_LSQ) {
-                // panic("mis-predicted load or store?!?!?");
-                
+                //panic("mis-predicted load or store?!?!?");
+                 ruu_recover_lsq(rs - LSQ);
             }
             
             
@@ -2440,7 +2532,9 @@ ruu_writeback(void)
              int  diff = rs-RUU;
              printf("DIFF %d\n", diff);
              printf("SIZE %lu", sizeof(struct RUU_station));*/
-            ruu_recover(rs - RUU);
+            else{
+                ruu_recover(rs - RUU);
+            }
             tracer_recover();
             bpred_recover(pred, rs->PC, rs->stack_recover_idx);
             
@@ -2707,7 +2801,7 @@ static int* load_issue(int currentLoadIndex)
     
     
     /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
-    printf("here1\n");
+    //printf("here1\n");
     int return_array[2];
     struct Map* currMap = storeSetMap;
     int found= 0; // initialize found to NOT FOUND
@@ -2719,7 +2813,7 @@ static int* load_issue(int currentLoadIndex)
             storeset = currMap->value;
             int conflict=0; // initialize conflictness to NO CONFLICT
             int iter2;
-            for(iter2=0; iter2 < 4; iter2++) {   // iterate throught the store set
+            for(iter2=0; iter2 < 8; iter2++) {   // iterate throught the store set
                 int iter3;
                 for (iter3=0; iter3<n_store_unresolved; iter3++){ // check to see if a particular store in the set is in flight
                     if (LSQ[store_unresolved_index[iter3]].PC == storeset[iter2]){
@@ -2757,7 +2851,7 @@ static int* load_issue(int currentLoadIndex)
                     if(storeSetMap[ssm_iter].key == LSQ[currentLoadIndex].PC){
                         int * values = storeSetMap[ssm_iter].value;
                         int itervalues;
-                        for(itervalues=0; itervalues < 3; itervalues++) {
+                        for(itervalues=0; itervalues < 8; itervalues++) {
                             if (*values == 0) {
                                 *values = LSQ[iterTrueConflicts].PC;
                                 break;
@@ -2770,7 +2864,7 @@ static int* load_issue(int currentLoadIndex)
                     }
                 }
                 
-                readyq_enqueue(&LSQ[currentLoadIndex]);
+                //readyq_enqueue(&LSQ[currentLoadIndex]);
                 return_array[0] = 1;
                 return_array[1] = trueConflict;
                 return return_array;
@@ -2781,7 +2875,7 @@ static int* load_issue(int currentLoadIndex)
         }
         
     }
-     printf("here2\n");
+    // printf("here2\n");
     if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
         
         int trueConflict = 0;
@@ -2812,18 +2906,18 @@ static int* load_issue(int currentLoadIndex)
                 
             }
         }
-         printf("here3\n");
-        readyq_enqueue(&LSQ[currentLoadIndex]);
-         printf("here4\n");
+         //printf("here3\n");
+        //readyq_enqueue(&LSQ[currentLoadIndex]);
+        // printf("here4\n");
         return_array[0] = 1;
         return_array[1] = trueConflict;
-         printf("here5\n");
+        // printf("here5\n");
         return return_array;
     }
-     printf("here6\n");
+     //printf("here6\n");
     return_array[0] = 0;
     return_array[1] = 0;
-     printf("here7\n");
+     //printf("here7\n");
     return return_array;
 }
 
@@ -4236,13 +4330,13 @@ break;							\
                 {
                     /* panic("store immediately ready"); */
                     /* put operation on ready list, ruu_issue() issue it later */
-                    printf("STORE QUEUED");
+                    //printf("STORE QUEUED");
                     readyq_enqueue(lsq);
                 }
                 /************ Modifying for 552 ***************/
-                if (((MD_OP_FLAGS(op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD)) && OPERANDS_READY(lsq)){
+                if (((MD_OP_FLAGS(op) & (F_MEM|F_LOAD)) == (F_MEM|F_LOAD))){
                     results = load_issue(old_lsq_tail); // added the old_lsq_variable so i can pass in the lsq index
-                    printf("SPEC");
+                   // printf("SPEC");
                 }
                 /************** **********************************/
             }
