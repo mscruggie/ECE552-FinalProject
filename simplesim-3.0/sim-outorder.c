@@ -2024,7 +2024,7 @@ readyq_enqueue(struct RUU_station *rs)		/* RS to enqueue */
     new_node->x.seq = rs->seq;
     
     /* locate insertion point */
-    if ((rs->ea_comp && rs->spec_load) || rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
+    if ((rs->ea_comp && rs->recover_inst) || rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
     {
         /* insert loads/stores and long latency ops at the head of the queue */
         prev = NULL;
@@ -2394,97 +2394,6 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
     /* FIXME: could reset functional units at squash time */
 }
 
-/* recover processor microarchitecture state back to point of the
-mis-predicted branch at RUU[BRANCH_INDEX] */
-static void
-ruu_recover_lsq(int branch_index)            /* index of mis-pred branch */
-{
-    //printf("%d\n", branch_index);
-    int i, RUU_index = RUU_tail, LSQ_index = LSQ_tail;
-    int RUU_prev_tail = RUU_tail, LSQ_prev_tail = LSQ_tail;
-    
-    /* recover from the tail of the RUU towards the head until the branch index
-     is reached, this direction ensures that the LSQ can be synchronized with
-     the RUU */
-    
-    /* go to first element to squash */
-    RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
-    LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
-    
-    /* traverse to older insts until the mispredicted branch is encountered */
-    //printf("*********************");
-    while (LSQ_index != branch_index)
-    {
-        //printf(" RUU INDEX %d \n", RUU_index);
-        //printf("BRANCH INDEX %d\n", branch_index);
-        
-        /* the RUU should not drain since the mispredicted branch will remain */
-        if (!RUU_num)
-            panic("empty RUU");
-        
-        /* should meet up with the tail first */
-        if (RUU_index == RUU_head)
-            panic("RUU head and tail broken %d", branch_index );
-        
-        /* is this operation an effective addr calc for a load or store? */
-        if (RUU[RUU_index].ea_comp)
-        {
-            /* should be at least one load or store in the LSQ */
-            if (!LSQ_num)
-                panic("RUU and LSQ out of sync");
-            
-            /* recover any resources consumed by the load or store operation */
-            for (i=0; i<MAX_ODEPS; i++)
-            {
-                RSLINK_FREE_LIST(LSQ[LSQ_index].odep_list[i]);
-                /* blow away the consuming op list */
-                LSQ[LSQ_index].odep_list[i] = NULL;
-            }
-            
-            /* squash this LSQ entry */
-            LSQ[LSQ_index].tag++;
-            
-            /* indicate in pipetrace that this instruction was squashed */
-            ptrace_endinst(LSQ[LSQ_index].ptrace_seq);
-            
-            /* go to next earlier LSQ slot */
-            LSQ_prev_tail = LSQ_index;
-            LSQ_index = (LSQ_index + (LSQ_size-1)) % LSQ_size;
-            LSQ_num--;
-        }
-        
-        /* recover any resources used by this RUU operation */
-        for (i=0; i<MAX_ODEPS; i++)
-        {
-            RSLINK_FREE_LIST(RUU[RUU_index].odep_list[i]);
-            /* blow away the consuming op list */
-            RUU[RUU_index].odep_list[i] = NULL;
-        }
-        
-        /* squash this RUU entry */
-        RUU[RUU_index].tag++;
-        
-        /* indicate in pipetrace that this instruction was squashed */
-        ptrace_endinst(RUU[RUU_index].ptrace_seq);
-        
-        /* go to next earlier slot in the RUU */
-        RUU_prev_tail = RUU_index;
-        RUU_index = (RUU_index + (RUU_size-1)) % RUU_size;
-        RUU_num--;
-    }
-    
-    /* reset head/tail pointers to point to the mis-predicted branch */
-    RUU_tail = RUU_prev_tail;
-    LSQ_tail = LSQ_prev_tail;
-    
-    /* revert create vector back to last precise create vector state, NOTE:
-     this is accomplished by resetting all the copied-on-write bits in the
-     USE_SPEC_CV bit vector */
-    BITMAP_CLEAR_MAP(use_spec_cv, CV_BMAP_SZ);
-    
-    /* FIXME: could reset functional units at squash time */
-}
-
 
 /*
  *  RUU_WRITEBACK() - instruction result writeback pipeline stage
@@ -2519,8 +2428,7 @@ ruu_writeback(void)
         {
             
             if (rs->in_LSQ) {
-                //panic("mis-predicted load or store?!?!?");
-                 ruu_recover_lsq(rs - LSQ);
+                panic("mis-predicted load or store?!?!?");
             }
             
             
@@ -2543,9 +2451,6 @@ ruu_writeback(void)
             /* stall fetch until I-fetch and I-decode recover */
             if(!rs->ea_comp){
                 ruu_fetch_issue_delay = ruu_branch_penalty;
-            }
-            else{
-                ruu_fetch_issue_delay = 1;
             }
             
             
