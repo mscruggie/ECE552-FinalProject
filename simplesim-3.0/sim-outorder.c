@@ -2024,7 +2024,7 @@ readyq_enqueue(struct RUU_station *rs)		/* RS to enqueue */
     new_node->x.seq = rs->seq;
     
     /* locate insertion point */
-    if (rs->ea_comp || rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
+    if ((rs->ea_comp && rs->spec_load) || rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
     {
         /* insert loads/stores and long latency ops at the head of the queue */
         prev = NULL;
@@ -2541,7 +2541,13 @@ ruu_writeback(void)
             
             
             /* stall fetch until I-fetch and I-decode recover */
-            ruu_fetch_issue_delay = ruu_branch_penalty;
+            if(!rs->ea_comp){
+                ruu_fetch_issue_delay = ruu_branch_penalty;
+            }
+            else{
+                ruu_fetch_issue_delay = 1;
+            }
+            
             
             /* continue writeback of the branch/control instruction */
         }
