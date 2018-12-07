@@ -1528,6 +1528,7 @@ struct RUU_station {
      operands are known to be read (see lsq_refresh() for details on
      enforcing memory dependencies) */
     int idep_ready[MAX_IDEPS];		/* input operand ready? */
+    int spec_load;
 };
 
 /* non-zero if all register operands are ready, update with MAX_IDEPS */
@@ -2023,7 +2024,7 @@ readyq_enqueue(struct RUU_station *rs)		/* RS to enqueue */
     new_node->x.seq = rs->seq;
     
     /* locate insertion point */
-    if (rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
+    if (rs->ea_comp || rs->in_LSQ || MD_OP_FLAGS(rs->op) & (F_LONGLAT|F_CTRL))
     {
         /* insert loads/stores and long latency ops at the head of the queue */
         prev = NULL;
@@ -2722,10 +2723,13 @@ lsq_refresh(void)
             && /* queued? */!LSQ[index].queued
             && /* waiting? */!LSQ[index].issued
             && /* completed? */!LSQ[index].completed
-            && /* regs ready? */OPERANDS_READY(&LSQ[index]))
-        {
+            && /* regs ready? */OPERANDS_READY(&LSQ[index])){
             /* no STA unknown conflict (because we got to this check), check for
              a STD unknown conflict */
+            if(LSQ[index].spec_load == 1 && OPERANDS_READY(&LSQ[index])){
+                readyq_enqueue(&LSQ[index]);
+                continue;
+            }
             for (j=0; j<n_std_unknowns; j++)
             {
                 /* found a relevant STD unknown? */
@@ -4424,6 +4428,7 @@ break;							\
                 spec_mode = TRUE;
                 rs->recover_inst = TRUE;
                 recover_PC = regs.regs_NPC;
+                lsq->spec_load = 1;
             }
         }
         
