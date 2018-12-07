@@ -2394,7 +2394,6 @@ ruu_recover(int branch_index)			/* index of mis-pred branch */
     /* FIXME: could reset functional units at squash time */
 }
 
-
 /*
  *  RUU_WRITEBACK() - instruction result writeback pipeline stage
  */
