@@ -2735,7 +2735,7 @@ static int* load_issue(int currentLoadIndex)
     
     /************** THEN SEE IF WE ARE ABLE TO QUEUE THE LOAD *********/
     //printf("here1\n");
-    struct Map* currMap = storeSetMap;
+   /* struct Map* currMap = storeSetMap;
     int found= 0; // initialize found to NOT FOUND
     md_addr_t * storeset;
     int iter;
@@ -2817,7 +2817,7 @@ static int* load_issue(int currentLoadIndex)
         
     }
      //printf("here2.0\n");
-    if(!found){ /********** LOAD NOT IN STORE SET MAP **********/
+    if(!found){
         
         int trueConflict = 0;
         int iterTrueConflicts;
@@ -2865,7 +2865,7 @@ static int* load_issue(int currentLoadIndex)
         return_array[1] = trueConflict;
         // printf("here5\n");
         return return_array;
-    }
+    }*/
      //printf("here6\n");
     int trueConflict = 0;
     int iterTrueConflicts;
@@ -2877,7 +2877,7 @@ static int* load_issue(int currentLoadIndex)
             break;
         }
     }
-    return_array[0] = 0;
+    return_array[0] = 1;
     return_array[1] = trueConflict;
      //printf("here7\n");
     return return_array;
